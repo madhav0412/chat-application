@@ -1,0 +1,144 @@
+This setup has two parts:
+1. **ChatServer.java** — handles multiple clients using threads
+2. **ChatClient.java** — connects to the server and sends/receives messages
+ 🖥️ 1️⃣ ChatServer.java
+import java.io.*;
+import java.net.*;
+import java.util.*;
+
+public class ChatServer {
+
+    private static final int PORT = 1234;
+    private static Set<ClientHandler> clientHandlers = new HashSet<>();
+
+    public static void main(String[] args) {
+        System.out.println("Chat Server started on port " + PORT);
+
+        try (ServerSocket serverSocket = new ServerSocket(PORT)) {
+            while (true) {
+                Socket socket = serverSocket.accept();
+                System.out.println("New client connected: " + socket.getInetAddress());
+
+                ClientHandler clientHandler = new ClientHandler(socket);
+                clientHandlers.add(clientHandler);
+                new Thread(clientHandler).start();
+            }
+        } catch (IOException e) {
+            System.out.println("Server error: " + e.getMessage());
+        }
+    }
+
+    // Broadcast message to all connected clients
+    public static synchronized void broadcastMessage(String message, ClientHandler excludeUser) {
+        for (ClientHandler client : clientHandlers) {
+            if (client != excludeUser) {
+                client.sendMessage(message);
+            }
+        }
+    }
+
+    // Remove client from the list when disconnected
+    public static synchronized void removeClient(ClientHandler clientHandler) {
+        clientHandlers.remove(clientHandler);
+        System.out.println("Client disconnected: " + clientHandler.getClientName());
+    }
+
+    // Inner class to handle each client in a separate thread
+    private static class ClientHandler implements Runnable {
+        private Socket socket;
+        private PrintWriter out;
+        private BufferedReader in;
+        private String clientName;
+
+        public ClientHandler(Socket socket) {
+            this.socket = socket;
+        }
+
+        public String getClientName() {
+            return clientName;
+        }
+
+        @Override
+        public void run() {
+            try {
+                in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                out = new PrintWriter(socket.getOutputStream(), true);
+
+                out.println("Enter your name: ");
+                clientName = in.readLine();
+                System.out.println(clientName + " joined the chat.");
+                broadcastMessage(clientName + " joined the chat.", this);
+
+                String message;
+                while ((message = in.readLine()) != null) {
+                    if (message.equalsIgnoreCase("exit")) {
+                        break;
+                    }
+                    System.out.println(clientName + ": " + message);
+                    broadcastMessage(clientName + ": " + message, this);
+                }
+
+                socket.close();
+                removeClient(this);
+                broadcastMessage(clientName + " left the chat.", this);
+
+            } catch (IOException e) {
+                System.out.println("Error handling client: " + e.getMessage());
+            }
+        }
+
+        // Send message to this client
+        public void sendMessage(String message) {
+            out.println(message);
+        }
+    }
+}
+💻 2️⃣ ChatClient.java
+import java.io.*;
+import java.net.*;
+import java.util.Scanner;
+
+public class ChatClient {
+
+    private static final String SERVER_IP = "localhost";
+    private static final int SERVER_PORT = 1234;
+
+    public static void main(String[] args) {
+        try (Socket socket = new Socket(SERVER_IP, SERVER_PORT)) {
+            System.out.println("Connected to the chat server.");
+
+            // Reader & Writer for server communication
+            BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+            PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+            Scanner scanner = new Scanner(System.in);
+
+            // Thread to read messages from server
+            new Thread(() -> {
+                String response;
+                try {
+                    while ((response = in.readLine()) != null) {
+                        System.out.println(response);
+                    }
+                } catch (IOException e) {
+                    System.out.println("Disconnected from server.");
+                }
+            }).start();
+
+            // Send messages to server
+            while (true) {
+                String message = scanner.nextLine();
+                out.println(message);
+                if (message.equalsIgnoreCase("exit")) {
+                    System.out.println("You left the chat.");
+                    break;
+                }
+            }
+
+            socket.close();
+        } catch (IOException e) {
+            System.out.println("Error connecting to server: " + e.getMessage());
+        }
+    }
+}
+
+
